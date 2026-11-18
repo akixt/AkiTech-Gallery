@@ -4,10 +4,10 @@ import android.graphics.Bitmap
 import java.io.File
 
 enum class AiStudioMode(val label: String) {
+    VISION_COACH("Vision AI"),
     IMAGE_STUDIO("Create / Edit"),
     ANIMATE_PHOTO("Animate Photo"),
-    TEXT_TO_VIDEO("Text to Video"),
-    MUSIC_STUDIO("Music Studio"),
+    VOICE_AUDIO("Voice & Audio"),
 }
 
 enum class AiImageAspectRatio(val label: String) {
@@ -27,29 +27,48 @@ enum class AiVideoAspectRatio(
     PORTRAIT_9_16("9:16", "9:16 Portrait", "9:16"),
 }
 
-enum class AiMusicVariant(
-    val modelId: String,
+enum class AiVoiceOption(
+    val voiceId: String,
     val label: String,
-    val subtitle: String,
+    val styleHint: String,
 ) {
-    CLIP(
-        modelId = "lyria-3-clip-preview",
-        label = "Clip (≤30s)",
-        subtitle = "lyria-3-clip-preview • Fast 30s loop or motif",
-    ),
-    PRO(
-        modelId = "lyria-3-pro-preview",
-        label = "Full Track (Pro)",
-        subtitle = "lyria-3-pro-preview • Complete multi-section song",
-    ),
+    CHARON("Charon", "Charon", "Warm documentary narrator"),
+    KORE("Kore", "Kore", "Clear studio host"),
+    AOEDE("Aoede", "Aoede", "Expressive storyteller"),
+    PUCK("Puck", "Puck", "Upbeat & energetic"),
+    FENRIR("Fenrir", "Fenrir", "Deep dramatic trailer"),
+    ZEPHYR("Zephyr", "Zephyr", "Calm & conversational"),
+}
+
+sealed interface FirebaseConnectionStatus {
+    data object Unknown : FirebaseConnectionStatus
+    data object Checking : FirebaseConnectionStatus
+    data class Connected(
+        val projectId: String,
+        val appCheckMode: String,
+        val modelId: String,
+    ) : FirebaseConnectionStatus
+
+    data class Disconnected(
+        val message: String,
+        val projectId: String?,
+    ) : FirebaseConnectionStatus
 }
 
 sealed interface AiTaskState<out T> {
     data object Idle : AiTaskState<Nothing>
     data class Loading(val statusMessage: String) : AiTaskState<Nothing>
+    data class Streaming(val partialText: String) : AiTaskState<Nothing>
     data class Success<T>(val data: T) : AiTaskState<T>
     data class Error(val message: String) : AiTaskState<Nothing>
 }
+
+data class GeneratedVisionResult(
+    val text: String,
+    val prompt: String,
+    val modelId: String,
+    val hasSourcePhoto: Boolean,
+)
 
 data class GeneratedImageResult(
     val bitmap: Bitmap,
@@ -58,18 +77,30 @@ data class GeneratedImageResult(
     val isEdit: Boolean,
 )
 
+data class PhotoMotionPlan(
+    val motionStyle: String,
+    val startScale: Float,
+    val endScale: Float,
+    val panStartX: Float,
+    val panStartY: Float,
+    val panEndX: Float,
+    val panEndY: Float,
+    val colorMood: String,
+    val directorNote: String,
+)
+
 data class GeneratedVideoResult(
     val videoFile: File,
     val prompt: String,
     val aspectRatio: AiVideoAspectRatio,
-    val isImageAnimation: Boolean,
-    val interactionId: String? = null,
+    val directorNote: String? = null,
+    val motionStyle: String? = null,
 )
 
 data class GeneratedAudioResult(
     val audioFile: File,
     val mimeType: String,
     val prompt: String,
-    val variant: AiMusicVariant,
-    val notesOrLyrics: String? = null,
+    val voice: AiVoiceOption,
+    val modelId: String,
 )

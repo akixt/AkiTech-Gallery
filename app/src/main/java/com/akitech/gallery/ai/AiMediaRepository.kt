@@ -1,60 +1,215 @@
 package com.akitech.gallery.ai
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
-import android.util.Base64
 import android.util.Log
+import com.akitech.gallery.BuildConfig
 import com.akitech.gallery.domain.model.AiImageAspectRatio
-import com.akitech.gallery.domain.model.AiMusicVariant
 import com.akitech.gallery.domain.model.AiVideoAspectRatio
+import com.akitech.gallery.domain.model.AiVoiceOption
+import com.akitech.gallery.domain.model.FirebaseConnectionStatus
 import com.akitech.gallery.domain.model.GeneratedAudioResult
 import com.akitech.gallery.domain.model.GeneratedImageResult
 import com.akitech.gallery.domain.model.GeneratedVideoResult
+import com.akitech.gallery.domain.model.PhotoMotionPlan
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
+import com.google.firebase.ai.FirebaseAI
+import com.google.firebase.ai.GenerativeModel
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.AspectRatio
+import com.google.firebase.ai.type.FirebaseAIException
+import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.ImageConfig
 import com.google.firebase.ai.type.ImagePart
 import com.google.firebase.ai.type.InlineDataPart
+import com.google.firebase.ai.type.QuotaExceededException
 import com.google.firebase.ai.type.ResponseModality
+import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.ServerException
+import com.google.firebase.ai.type.ServiceDisabledException
+import com.google.firebase.ai.type.SpeechConfig
+import com.google.firebase.ai.type.Voice
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 import com.google.firebase.appcheck.FirebaseAppCheck
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 
 class AiMediaRepository(
     private val context: Context,
 ) {
-    private val httpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(45, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .build()
+    private val firebaseAi: FirebaseAI by lazy {
+        if (FirebaseApp.getApps(context).isEmpty()) {
+            FirebaseApp.initializeApp(context)
+        }
+        Firebase.ai(backend = GenerativeBackend.googleAI())
+    }
+
+    private val visionModel: GenerativeModel by lazy {
+        firebaseAi.generativeModel(
+            modelName = MODEL_GEMINI_FLASH,
+        )
+    }
+
+    private val motionDirectorModel: GenerativeModel by lazy {
+        val motionSchema = Schema.obj(
+            properties = mapOf(
+                "motionStyle" to Schema.enumeration(
+                    values = listOf("zoom_in", "zoom_out", "pan_left", "pan_right", "ken_burns"),
+                    description = "Camera movement preset best fitting the photo composition",
+                ),
+                "startScale" to Schema.double(
+                    description = "Starting zoom factor between 1.0 and 1.35",
+                ),
+                "endScale" to Schema.double(
+                    description = "Ending zoom factor between 1.0 and 1.45",
+                ),
+                "panStartX" to Schema.double(
+                    description = "Horizontal start pan ratio between -0.35 and 0.35",
+                ),
+                "panStartY" to Schema.double(
+                    description = "Vertical start pan ratio between -0.35 and 0.35",
+                ),
+                "panEndX" to Schema.double(
+                    description = "Horizontal end pan ratio between -0.35 and 0.35",
+                ),
+                "panEndY" to Schema.double(
+                    description = "Vertical end pan ratio between -0.35 and 0.35",
+                ),
+                "colorMood" to Schema.enumeration(
+                    values = listOf("natural", "warm_gold", "cool_cyan", "noir_cinema"),
+                    description = "Color grade mood matching the prompt and image",
+                ),
+                "directorNote" to Schema.string(
+                    description = "Short 1-sentence director summary of camera motion and mood",
+                ),
+            ),
+        )
+        firebaseAi.generativeModel(
+            modelName = MODEL_GEMINI_FLASH,
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = motionSchema
+            },
+        )
     }
 
     private val aiCacheDir: File
         get() = context.cacheDir.resolve("ai_studio").apply { mkdirs() }
+
+    suspend fun verifyFirebaseConnection(): FirebaseConnectionStatus = withContext(Dispatchers.IO) {
+        val projectId = runCatching {
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                FirebaseApp.initializeApp(context)
+            }
+            FirebaseApp.getInstance().options.projectId
+        }.getOrNull()
+
+        val appCheckMode = if (BuildConfig.DEBUG) "Debug App Check" else "reCAPTCHA Enterprise"
+
+        try {
+            // Verify App Check token can be requested without throwing
+            val appCheckError = runCatching {
+                FirebaseAppCheck.getInstance().getAppCheckToken(false).await()
+            }.exceptionOrNull()
+
+            if (appCheckError != null) {
+                Log.w(TAG, "App Check token warning before AI ping", appCheckError)
+            }
+
+            val response = withTimeout(PING_TIMEOUT_MS) {
+                visionModel.generateContent("Reply with OK.")
+            }
+
+            val reply = response.text?.trim().orEmpty()
+            if (reply.isBlank()) {
+                return@withContext FirebaseConnectionStatus.Disconnected(
+                    message = "Firebase AI Logic returned an empty verification response.",
+                    projectId = projectId,
+                )
+            }
+
+            FirebaseConnectionStatus.Connected(
+                projectId = projectId ?: "Configured",
+                appCheckMode = appCheckMode,
+                modelId = MODEL_GEMINI_FLASH,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Firebase AI Logic connection check failed", e)
+            FirebaseConnectionStatus.Disconnected(
+                message = formatFirebaseError(e),
+                projectId = projectId,
+            )
+        }
+    }
+
+    fun streamVisionAnalysis(
+        prompt: String,
+        sourceImageUri: Uri?,
+    ): Flow<String> = flow {
+        val cleanPrompt = prompt.trim()
+        require(cleanPrompt.isNotEmpty() || sourceImageUri != null) {
+            "Enter a question/instruction or select a photo to analyze."
+        }
+        val effectivePrompt = cleanPrompt.ifEmpty {
+            "Analyze this photo in detail: describe the scene, lighting, composition, suggested color/crop edits, and a short social caption."
+        }
+
+        val inputBitmap = if (sourceImageUri != null) {
+            decodeScaledBitmap(sourceImageUri, maxDimension = 1536)
+                ?: throw IllegalStateException("Could not decode the selected photo.")
+        } else {
+            null
+        }
+
+        val stream = if (inputBitmap != null) {
+            visionModel.generateContentStream(
+                content {
+                    image(inputBitmap)
+                    text(effectivePrompt)
+                },
+            )
+        } else {
+            visionModel.generateContentStream(effectivePrompt)
+        }
+
+        withTimeout(VISION_TIMEOUT_MS) {
+            stream.collect { chunk ->
+                val chunkText = chunk.text.orEmpty()
+                if (chunkText.isNotEmpty()) {
+                    emit(chunkText)
+                }
+            }
+        }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun enhancePromptWithGemini(
+        rawIdea: String,
+        targetTask: String,
+    ): String = withContext(Dispatchers.IO) {
+        val clean = rawIdea.trim()
+        require(clean.isNotEmpty()) { "Enter a short idea first so Gemini can enhance it." }
+        val response = withTimeout(PING_TIMEOUT_MS) {
+            visionModel.generateContent(
+                "Rewrite the following user idea into a vivid, concise, high-quality single-paragraph $targetTask prompt (max 60 words, return ONLY the prompt text without quotes):\n\n$clean",
+            )
+        }
+        response.text?.trim()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Gemini returned an empty prompt.")
+    }
 
     suspend fun generateOrEditImage(
         prompt: String,
@@ -79,7 +234,7 @@ class AiMediaRepository(
                 .build()
         }
 
-        val model = Firebase.ai.generativeModel(
+        val model = firebaseAi.generativeModel(
             modelName = MODEL_IMAGE_NANO_BANANA,
             generationConfig = config,
         )
@@ -132,174 +287,89 @@ class AiMediaRepository(
         )
     }
 
-    suspend fun generateVideoViaInteractions(
+    suspend fun animatePhotoWithAiDirector(
         prompt: String,
-        sourceImageUri: Uri?,
+        sourceImageUri: Uri,
         aspectRatio: AiVideoAspectRatio,
-        durationSeconds: Int = 8,
+        durationSeconds: Int,
         onProgress: (String) -> Unit,
     ): GeneratedVideoResult = withContext(Dispatchers.IO) {
-        val cleanPrompt = prompt.trim()
-        require(cleanPrompt.isNotEmpty() || sourceImageUri != null) {
-            "Please enter a prompt or select a photo to animate."
-        }
-        val effectivePrompt = cleanPrompt.ifEmpty {
-            "Animate this photo smoothly with cinematic natural motion and realistic lighting."
+        val effectivePrompt = prompt.trim().ifEmpty {
+            "Smooth cinematic push-in with natural golden lighting."
         }
 
-        val firebaseApp = FirebaseApp.getInstance()
-        val apiKey = firebaseApp.options.apiKey
-        require(apiKey.isNotBlank()) { "Firebase API key is missing from configuration." }
+        onProgress("Loading photo & consulting $MODEL_GEMINI_FLASH via Firebase AI...")
+        val bitmap = decodeScaledBitmap(sourceImageUri, maxDimension = 1920)
+            ?: throw IllegalStateException("Could not decode the selected photo.")
 
-        val appCheckToken = runCatching {
-            FirebaseAppCheck.getInstance().getAppCheckToken(false).await().token
-        }.getOrNull()
-
-        onProgress(
-            if (sourceImageUri != null) {
-                "Preparing image for $MODEL_VIDEO_OMNI..."
-            } else {
-                "Sending request to $MODEL_VIDEO_OMNI..."
-            },
-        )
-
-        val requestPayload = JSONObject().apply {
-            put("model", MODEL_VIDEO_OMNI)
-            if (sourceImageUri != null) {
-                val bitmap = decodeScaledBitmap(sourceImageUri, maxDimension = 1280)
-                    ?: throw IllegalStateException("Could not decode the selected photo.")
-                val jpegBytes = ByteArrayOutputStream().use { baos ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 88, baos)
-                    baos.toByteArray()
-                }
-                val encodedImage = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-                put(
-                    "input",
-                    JSONArray().apply {
-                        put(
-                            JSONObject().apply {
-                                put("type", "image")
-                                put("data", encodedImage)
-                                put("mime_type", "image/jpeg")
-                            },
-                        )
-                        put(
-                            JSONObject().apply {
-                                put("type", "text")
-                                put("text", effectivePrompt)
-                            },
-                        )
-                    },
-                )
-            } else {
-                put("input", effectivePrompt)
-            }
-            put(
-                "response_format",
-                JSONObject().apply {
-                    put("type", "video")
-                    put("aspect_ratio", aspectRatio.apiValue)
-                    put("resolution", "720p")
-                    put("duration", "${durationSeconds.coerceIn(3, 15)}s")
+        val directorResponse = withTimeout(VISION_TIMEOUT_MS) {
+            motionDirectorModel.generateContent(
+                content {
+                    image(bitmap)
+                    text(
+                        "Direct a smooth Ken Burns motion video for this photo in ${aspectRatio.apiValue} framing for ${durationSeconds}s. User direction: $effectivePrompt",
+                    )
                 },
             )
         }
 
-        val certSha1 = getAppSignatureSha1()
+        val planJsonText = directorResponse.text
+            ?: throw IllegalStateException("Firebase AI Director returned an empty motion plan.")
 
-        val initialJson = withTimeout(VIDEO_TIMEOUT_MS) {
-            executeInteractionPost(
-                payload = requestPayload,
-                apiKey = apiKey,
-                appCheckToken = appCheckToken,
-                certSha1 = certSha1,
+        val plan = parseMotionPlan(JSONObject(planJsonText))
+
+        onProgress("Rendering ${aspectRatio.shortLabel} MP4 (${plan.motionStyle})...")
+        val outFile = File(aiCacheDir, "ai_motion_${System.currentTimeMillis()}.mp4")
+        try {
+            PhotoMotionVideoEncoder.encode(
+                bitmap = bitmap,
+                plan = plan,
+                aspectRatio = aspectRatio,
+                durationSeconds = durationSeconds,
+                outputFile = outFile,
+                onProgress = { pct ->
+                    onProgress("Encoding ${aspectRatio.shortLabel} MP4 ($pct%)...")
+                },
             )
+        } finally {
+            bitmap.recycle()
         }
 
-        val interactionId = initialJson.optString("id").takeIf { it.isNotBlank() }
-        var currentJson = initialJson
-
-        val finalJson = withTimeout(VIDEO_TIMEOUT_MS) {
-            while (true) {
-                val status = currentJson.optString("status").lowercase()
-                if (status == "failed" || status == "error" || status == "cancelled") {
-                    val errMsg = currentJson.optJSONObject("error")?.optString("message")
-                        ?: currentJson.optString("status_message")
-                        ?: "Video generation failed ($status)."
-                    throw IllegalStateException(errMsg)
-                }
-                if (status == "completed" || status == "succeeded" || hasVideoPayload(currentJson)) {
-                    break
-                }
-                if (interactionId == null) {
-                    throw IllegalStateException("Interactions API returned status '$status' without an interaction ID.")
-                }
-                onProgress("Rendering ${aspectRatio.shortLabel} video on $MODEL_VIDEO_OMNI...")
-                delay(3_000L)
-                currentJson = executeInteractionGet(
-                    interactionId = interactionId,
-                    apiKey = apiKey,
-                    appCheckToken = appCheckToken,
-                    certSha1 = certSha1,
-                )
-            }
-            currentJson
+        if (!outFile.exists() || outFile.length() == 0L) {
+            throw IllegalStateException("Encoded MP4 file was empty.")
         }
-
-        onProgress("Downloading generated video...")
-        val videoBytes = extractVideoBytes(
-            responseJson = finalJson,
-            apiKey = apiKey,
-            appCheckToken = appCheckToken,
-            certSha1 = certSha1,
-        ) ?: throw IllegalStateException(
-            "Interaction completed without a video payload. Response keys: ${finalJson.keys().asSequence().toList()}",
-        )
-
-        val outFile = File(aiCacheDir, "ai_video_${System.currentTimeMillis()}.mp4")
-        outFile.writeBytes(videoBytes)
 
         GeneratedVideoResult(
             videoFile = outFile,
             prompt = effectivePrompt,
             aspectRatio = aspectRatio,
-            isImageAnimation = sourceImageUri != null,
-            interactionId = interactionId,
+            directorNote = plan.directorNote,
+            motionStyle = plan.motionStyle,
         )
     }
 
-    suspend fun generateMusic(
-        prompt: String,
-        genreOrMood: String,
-        lyrics: String,
-        variant: AiMusicVariant,
+    suspend fun generateVoiceAudio(
+        scriptText: String,
+        voice: AiVoiceOption,
         onProgress: (String) -> Unit,
     ): GeneratedAudioResult = withContext(Dispatchers.IO) {
-        val cleanPrompt = prompt.trim()
-        require(cleanPrompt.isNotEmpty()) { "Please describe the music track you want to create." }
+        val cleanScript = scriptText.trim()
+        require(cleanScript.isNotEmpty()) { "Enter narration or dialogue text to synthesize." }
 
-        val fullPrompt = buildString {
-            append(cleanPrompt)
-            if (genreOrMood.isNotBlank()) {
-                append("\nStyle / Mood: ").append(genreOrMood.trim())
-            }
-            if (lyrics.isNotBlank()) {
-                append("\nLyrics:\n").append(lyrics.trim())
-            }
-        }
-
-        onProgress("Composing with ${variant.modelId}...")
+        onProgress("Synthesizing ${voice.label} audio via $MODEL_AUDIO_TTS...")
 
         val config = generationConfig {
-            responseModalities = listOf(ResponseModality.AUDIO, ResponseModality.TEXT)
+            responseModalities = listOf(ResponseModality.AUDIO)
+            speechConfig = SpeechConfig(voice = Voice(voice.voiceId))
         }
-        val model = Firebase.ai.generativeModel(
-            modelName = variant.modelId,
+
+        val model = firebaseAi.generativeModel(
+            modelName = MODEL_AUDIO_TTS,
             generationConfig = config,
         )
 
-        val response = withTimeout(MUSIC_TIMEOUT_MS) {
-            model.generateContent(fullPrompt)
+        val response = withTimeout(AUDIO_TIMEOUT_MS) {
+            model.generateContent(cleanScript)
         }
 
         val candidateParts = response.candidates.firstOrNull()?.content?.parts.orEmpty()
@@ -312,185 +382,63 @@ class AiMediaRepository(
         if (audioPart == null || audioPart.inlineData.isEmpty()) {
             val textFeedback = response.text?.takeIf { it.isNotBlank() }
             throw IllegalStateException(
-                textFeedback ?: "No audio data was returned by ${variant.modelId}.",
+                textFeedback ?: "No audio data was returned by $MODEL_AUDIO_TTS.",
             )
         }
 
-        val mime = audioPart.mimeType.ifBlank { "audio/mpeg" }
-        val ext = when {
-            mime.contains("wav", ignoreCase = true) -> "wav"
-            mime.contains("aac", ignoreCase = true) -> "aac"
-            mime.contains("ogg", ignoreCase = true) -> "ogg"
-            else -> "mp3"
-        }
-        val outFile = File(aiCacheDir, "ai_music_${System.currentTimeMillis()}.$ext")
-        outFile.writeBytes(audioPart.inlineData)
+        val prepared = AudioWavHelper.preparePlayableAudio(
+            rawBytes = audioPart.inlineData,
+            rawMimeType = audioPart.mimeType,
+        )
+
+        val outFile = File(aiCacheDir, "ai_audio_${System.currentTimeMillis()}.${prepared.fileExtension}")
+        outFile.writeBytes(prepared.bytes)
 
         GeneratedAudioResult(
             audioFile = outFile,
-            mimeType = mime,
-            prompt = cleanPrompt,
-            variant = variant,
-            notesOrLyrics = response.text?.takeIf { it.isNotBlank() },
+            mimeType = prepared.mimeType,
+            prompt = cleanScript,
+            voice = voice,
+            modelId = MODEL_AUDIO_TTS,
         )
     }
 
-    private fun executeInteractionPost(
-        payload: JSONObject,
-        apiKey: String,
-        appCheckToken: String?,
-        certSha1: String?,
-    ): JSONObject {
-        val reqBuilder = Request.Builder()
-            .url(INTERACTIONS_ENDPOINT)
-            .addHeader("Content-Type", "application/json")
-            .addHeader("x-goog-api-key", apiKey)
-            .addHeader("X-Android-Package", context.packageName)
-            .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
-
-        if (!appCheckToken.isNullOrBlank()) {
-            reqBuilder.addHeader("X-Firebase-AppCheck", appCheckToken)
-        }
-        if (!certSha1.isNullOrBlank()) {
-            reqBuilder.addHeader("X-Android-Cert", certSha1)
-        }
-
-        httpClient.newCall(reqBuilder.build()).execute().use { response ->
-            val raw = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                val parsedError = runCatching {
-                    JSONObject(raw).optJSONObject("error")?.optString("message")
-                }.getOrNull()
-                Log.e(TAG, "Interactions POST failed (${response.code}): $raw")
-                throw IllegalStateException(
-                    parsedError?.takeIf { it.isNotBlank() }
-                        ?: "Interactions API error ${response.code}: ${raw.take(240)}",
-                )
-            }
-            return JSONObject(raw)
-        }
+    fun parseMotionPlan(json: JSONObject): PhotoMotionPlan {
+        val startScale = json.optDouble("startScale", 1.0).toFloat().coerceIn(1.0f, 1.4f)
+        val endScale = json.optDouble("endScale", 1.24).toFloat().coerceIn(1.0f, 1.5f)
+        return PhotoMotionPlan(
+            motionStyle = json.optString("motionStyle", "ken_burns"),
+            startScale = startScale,
+            endScale = endScale,
+            panStartX = json.optDouble("panStartX", -0.15).toFloat().coerceIn(-0.35f, 0.35f),
+            panStartY = json.optDouble("panStartY", 0.0).toFloat().coerceIn(-0.35f, 0.35f),
+            panEndX = json.optDouble("panEndX", 0.15).toFloat().coerceIn(-0.35f, 0.35f),
+            panEndY = json.optDouble("panEndY", 0.0).toFloat().coerceIn(-0.35f, 0.35f),
+            colorMood = json.optString("colorMood", "natural"),
+            directorNote = json.optString("directorNote", "Smooth cinematic Ken Burns motion."),
+        )
     }
 
-    private fun executeInteractionGet(
-        interactionId: String,
-        apiKey: String,
-        appCheckToken: String?,
-        certSha1: String?,
-    ): JSONObject {
-        val reqBuilder = Request.Builder()
-            .url("$INTERACTIONS_ENDPOINT/$interactionId")
-            .addHeader("x-goog-api-key", apiKey)
-            .addHeader("X-Android-Package", context.packageName)
-            .get()
-
-        if (!appCheckToken.isNullOrBlank()) {
-            reqBuilder.addHeader("X-Firebase-AppCheck", appCheckToken)
-        }
-        if (!certSha1.isNullOrBlank()) {
-            reqBuilder.addHeader("X-Android-Cert", certSha1)
-        }
-
-        httpClient.newCall(reqBuilder.build()).execute().use { response ->
-            val raw = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                val parsedError = runCatching {
-                    JSONObject(raw).optJSONObject("error")?.optString("message")
-                }.getOrNull()
-                Log.e(TAG, "Interactions GET failed (${response.code}): $raw")
-                throw IllegalStateException(
-                    parsedError?.takeIf { it.isNotBlank() }
-                        ?: "Polling failed (${response.code}): ${raw.take(240)}",
-                )
+    fun formatFirebaseError(error: Throwable): String {
+        val rawMsg = error.localizedMessage ?: error.message ?: "Firebase AI request failed."
+        return when (error) {
+            is QuotaExceededException -> {
+                "Firebase AI quota or billing tier limit reached: $rawMsg"
             }
-            return JSONObject(raw)
-        }
-    }
-
-    private fun hasVideoPayload(json: JSONObject): Boolean {
-        if (json.optJSONObject("output_video") != null) return true
-        val outputs = json.optJSONArray("outputs")
-        if (outputs != null && outputs.length() > 0) {
-            for (i in 0 until outputs.length()) {
-                val item = outputs.optJSONObject(i) ?: continue
-                if (item.optString("type").equals("video", ignoreCase = true) ||
-                    item.optString("mime_type").startsWith("video/", ignoreCase = true)
-                ) {
-                    return true
+            is ServiceDisabledException -> {
+                "Firebase AI Logic API is disabled for this project: $rawMsg"
+            }
+            is ServerException -> {
+                "Firebase AI Logic server error: $rawMsg"
+            }
+            is FirebaseAIException -> {
+                if (rawMsg.contains("403") || rawMsg.contains("AppCheck", ignoreCase = true)) {
+                    "Firebase App Check or permission check failed (403): $rawMsg"
+                } else {
+                    rawMsg
                 }
             }
-        }
-        val steps = json.optJSONArray("steps")
-        if (steps != null) {
-            for (i in 0 until steps.length()) {
-                val step = steps.optJSONObject(i) ?: continue
-                val content = step.optJSONArray("content") ?: continue
-                for (j in 0 until content.length()) {
-                    val part = content.optJSONObject(j) ?: continue
-                    if (part.optString("type").equals("video", ignoreCase = true) ||
-                        part.optString("mime_type").startsWith("video/", ignoreCase = true)
-                    ) {
-                        return true
-                    }
-                }
-            }
-        }
-        return false
-    }
-
-    private fun extractVideoBytes(
-        responseJson: JSONObject,
-        apiKey: String,
-        appCheckToken: String?,
-        certSha1: String?,
-    ): ByteArray? {
-        val candidateObjects = buildList {
-            responseJson.optJSONObject("output_video")?.let(::add)
-            responseJson.optJSONArray("outputs")?.let { arr ->
-                for (i in 0 until arr.length()) {
-                    arr.optJSONObject(i)?.let(::add)
-                }
-            }
-            responseJson.optJSONArray("steps")?.let { steps ->
-                for (i in 0 until steps.length()) {
-                    val step = steps.optJSONObject(i) ?: continue
-                    val content = step.optJSONArray("content") ?: continue
-                    for (j in 0 until content.length()) {
-                        content.optJSONObject(j)?.let(::add)
-                    }
-                }
-            }
-        }
-
-        val videoObj = candidateObjects.firstOrNull { obj ->
-            obj.optString("type").equals("video", ignoreCase = true) ||
-                obj.optString("mime_type").startsWith("video/", ignoreCase = true) ||
-                obj.has("data") ||
-                obj.has("uri")
-        } ?: return null
-
-        val base64Data = videoObj.optString("data").takeIf { it.isNotBlank() }
-        if (base64Data != null) {
-            return Base64.decode(base64Data, Base64.DEFAULT)
-        }
-
-        val downloadUri = videoObj.optString("uri").takeIf { it.isNotBlank() } ?: return null
-        val reqBuilder = Request.Builder()
-            .url(downloadUri)
-            .addHeader("x-goog-api-key", apiKey)
-            .addHeader("X-Android-Package", context.packageName)
-            .get()
-        if (!appCheckToken.isNullOrBlank()) {
-            reqBuilder.addHeader("X-Firebase-AppCheck", appCheckToken)
-        }
-        if (!certSha1.isNullOrBlank()) {
-            reqBuilder.addHeader("X-Android-Cert", certSha1)
-        }
-
-        httpClient.newCall(reqBuilder.build()).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw IllegalStateException("Failed to download generated video (HTTP ${resp.code}).")
-            }
-            return resp.body?.bytes()
+            else -> rawMsg
         }
     }
 
@@ -522,34 +470,14 @@ class AiMediaRepository(
         return scaled
     }
 
-    @Suppress("DEPRECATION")
-    private fun getAppSignatureSha1(): String? {
-        return runCatching {
-            val pm = context.packageManager
-            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-                info.signingInfo?.apkContentsSigners
-            } else {
-                val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
-                info.signatures
-            }
-            val certBytes = signatures?.firstOrNull()?.toByteArray() ?: return null
-            val digest = MessageDigest.getInstance("SHA-1").digest(certBytes)
-            digest.joinToString("") { "%02X".format(it) }
-        }.getOrNull()
-    }
-
     companion object {
         private const val TAG = "AiMediaRepository"
+        const val MODEL_GEMINI_FLASH = "gemini-3.8-flash"
         const val MODEL_IMAGE_NANO_BANANA = "gemini-nano-banana-2.1"
-        const val MODEL_VIDEO_OMNI = "gemini-omni-1.2-flash"
-        const val MODEL_MUSIC_CLIP = "lyria-3-clip-preview"
-        const val MODEL_MUSIC_PRO = "lyria-3-pro-preview"
-        private const val INTERACTIONS_ENDPOINT =
-            "https://generativelanguage.googleapis.com/v1beta/interactions"
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        const val MODEL_AUDIO_TTS = "gemini-3.1-flash-tts-preview"
+        private const val PING_TIMEOUT_MS = 30_000L
+        private const val VISION_TIMEOUT_MS = 60_000L
         private const val IMAGE_TIMEOUT_MS = 60_000L
-        private const val VIDEO_TIMEOUT_MS = 180_000L
-        private const val MUSIC_TIMEOUT_MS = 120_000L
+        private const val AUDIO_TIMEOUT_MS = 60_000L
     }
 }

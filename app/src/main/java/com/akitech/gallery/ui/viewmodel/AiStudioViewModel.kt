@@ -13,14 +13,15 @@ import com.akitech.gallery.R
 import com.akitech.gallery.ai.AiMediaRepository
 import com.akitech.gallery.data.repository.GalleryRepository
 import com.akitech.gallery.domain.model.AiImageAspectRatio
-import com.akitech.gallery.domain.model.AiMusicVariant
 import com.akitech.gallery.domain.model.AiStudioMode
 import com.akitech.gallery.domain.model.AiTaskState
 import com.akitech.gallery.domain.model.AiVideoAspectRatio
+import com.akitech.gallery.domain.model.AiVoiceOption
+import com.akitech.gallery.domain.model.FirebaseConnectionStatus
 import com.akitech.gallery.domain.model.GeneratedAudioResult
 import com.akitech.gallery.domain.model.GeneratedImageResult
 import com.akitech.gallery.domain.model.GeneratedVideoResult
-import com.google.firebase.ai.type.QuotaExceededException
+import com.akitech.gallery.domain.model.GeneratedVisionResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,8 +38,21 @@ class AiStudioViewModel(
     private val galleryRepository: GalleryRepository,
 ) : AndroidViewModel(app) {
 
-    private val _activeMode = MutableStateFlow(AiStudioMode.IMAGE_STUDIO)
+    private val _connectionStatus = MutableStateFlow<FirebaseConnectionStatus>(FirebaseConnectionStatus.Unknown)
+    val connectionStatus: StateFlow<FirebaseConnectionStatus> = _connectionStatus.asStateFlow()
+
+    private val _activeMode = MutableStateFlow(AiStudioMode.VISION_COACH)
     val activeMode: StateFlow<AiStudioMode> = _activeMode.asStateFlow()
+
+    // Vision & Creative Coach state
+    private val _visionSourceUri = MutableStateFlow<Uri?>(null)
+    val visionSourceUri: StateFlow<Uri?> = _visionSourceUri.asStateFlow()
+
+    private val _visionPrompt = MutableStateFlow("")
+    val visionPrompt: StateFlow<String> = _visionPrompt.asStateFlow()
+
+    private val _visionTaskState = MutableStateFlow<AiTaskState<GeneratedVisionResult>>(AiTaskState.Idle)
+    val visionTaskState: StateFlow<AiTaskState<GeneratedVisionResult>> = _visionTaskState.asStateFlow()
 
     // Image Studio state
     private val _imagePrompt = MutableStateFlow("")
@@ -50,46 +64,57 @@ class AiStudioViewModel(
     private val _imageAspectRatio = MutableStateFlow(AiImageAspectRatio.SQUARE_1_1)
     val imageAspectRatio: StateFlow<AiImageAspectRatio> = _imageAspectRatio.asStateFlow()
 
+    private val _isEnhancingPrompt = MutableStateFlow(false)
+    val isEnhancingPrompt: StateFlow<Boolean> = _isEnhancingPrompt.asStateFlow()
+
     private val _imageTaskState = MutableStateFlow<AiTaskState<GeneratedImageResult>>(AiTaskState.Idle)
     val imageTaskState: StateFlow<AiTaskState<GeneratedImageResult>> = _imageTaskState.asStateFlow()
 
-    // Animate Photo & Text-to-Video state
+    // Animate Photo (AI Motion Director + MP4 Encoder) state
     private val _animateSourceUri = MutableStateFlow<Uri?>(null)
     val animateSourceUri: StateFlow<Uri?> = _animateSourceUri.asStateFlow()
 
     private val _animatePrompt = MutableStateFlow("")
     val animatePrompt: StateFlow<String> = _animatePrompt.asStateFlow()
 
-    private val _videoPrompt = MutableStateFlow("")
-    val videoPrompt: StateFlow<String> = _videoPrompt.asStateFlow()
-
     private val _videoAspectRatio = MutableStateFlow(AiVideoAspectRatio.LANDSCAPE_16_9)
     val videoAspectRatio: StateFlow<AiVideoAspectRatio> = _videoAspectRatio.asStateFlow()
 
-    private val _videoDurationSeconds = MutableStateFlow(8)
+    private val _videoDurationSeconds = MutableStateFlow(6)
     val videoDurationSeconds: StateFlow<Int> = _videoDurationSeconds.asStateFlow()
 
     private val _videoTaskState = MutableStateFlow<AiTaskState<GeneratedVideoResult>>(AiTaskState.Idle)
     val videoTaskState: StateFlow<AiTaskState<GeneratedVideoResult>> = _videoTaskState.asStateFlow()
 
-    // Music Studio state
-    private val _musicPrompt = MutableStateFlow("")
-    val musicPrompt: StateFlow<String> = _musicPrompt.asStateFlow()
+    // Voice & Audio Studio state
+    private val _audioScript = MutableStateFlow("")
+    val audioScript: StateFlow<String> = _audioScript.asStateFlow()
 
-    private val _musicMood = MutableStateFlow("")
-    val musicMood: StateFlow<String> = _musicMood.asStateFlow()
+    private val _selectedVoice = MutableStateFlow(AiVoiceOption.CHARON)
+    val selectedVoice: StateFlow<AiVoiceOption> = _selectedVoice.asStateFlow()
 
-    private val _musicLyrics = MutableStateFlow("")
-    val musicLyrics: StateFlow<String> = _musicLyrics.asStateFlow()
+    private val _isDraftingScript = MutableStateFlow(false)
+    val isDraftingScript: StateFlow<Boolean> = _isDraftingScript.asStateFlow()
 
-    private val _musicVariant = MutableStateFlow(AiMusicVariant.CLIP)
-    val musicVariant: StateFlow<AiMusicVariant> = _musicVariant.asStateFlow()
-
-    private val _musicTaskState = MutableStateFlow<AiTaskState<GeneratedAudioResult>>(AiTaskState.Idle)
-    val musicTaskState: StateFlow<AiTaskState<GeneratedAudioResult>> = _musicTaskState.asStateFlow()
+    private val _audioTaskState = MutableStateFlow<AiTaskState<GeneratedAudioResult>>(AiTaskState.Idle)
+    val audioTaskState: StateFlow<AiTaskState<GeneratedAudioResult>> = _audioTaskState.asStateFlow()
 
     private val _events = MutableSharedFlow<String>()
     val events: SharedFlow<String> = _events.asSharedFlow()
+
+    fun ensureConnectionChecked() {
+        if (_connectionStatus.value is FirebaseConnectionStatus.Unknown) {
+            checkFirebaseConnection()
+        }
+    }
+
+    fun checkFirebaseConnection() {
+        if (_connectionStatus.value is FirebaseConnectionStatus.Checking) return
+        viewModelScope.launch {
+            _connectionStatus.value = FirebaseConnectionStatus.Checking
+            _connectionStatus.value = aiRepository.verifyFirebaseConnection()
+        }
+    }
 
     fun setActiveMode(mode: AiStudioMode) {
         _activeMode.value = mode
@@ -98,10 +123,19 @@ class AiStudioViewModel(
     fun launchWithPhoto(uri: Uri, targetMode: AiStudioMode) {
         _activeMode.value = targetMode
         when (targetMode) {
+            AiStudioMode.VISION_COACH -> _visionSourceUri.value = uri
             AiStudioMode.IMAGE_STUDIO -> _imageSourceUri.value = uri
             AiStudioMode.ANIMATE_PHOTO -> _animateSourceUri.value = uri
-            else -> Unit
+            AiStudioMode.VOICE_AUDIO -> Unit
         }
+    }
+
+    fun onVisionSourceSelected(uri: Uri?) {
+        _visionSourceUri.value = uri
+    }
+
+    fun onVisionPromptChanged(value: String) {
+        _visionPrompt.value = value
     }
 
     fun onImagePromptChanged(value: String) {
@@ -124,10 +158,6 @@ class AiStudioViewModel(
         _animatePrompt.value = value
     }
 
-    fun onVideoPromptChanged(value: String) {
-        _videoPrompt.value = value
-    }
-
     fun onVideoAspectRatioChanged(ratio: AiVideoAspectRatio) {
         _videoAspectRatio.value = ratio
     }
@@ -136,20 +166,85 @@ class AiStudioViewModel(
         _videoDurationSeconds.value = seconds.coerceIn(3, 15)
     }
 
-    fun onMusicPromptChanged(value: String) {
-        _musicPrompt.value = value
+    fun onAudioScriptChanged(value: String) {
+        _audioScript.value = value
     }
 
-    fun onMusicMoodChanged(value: String) {
-        _musicMood.value = value
+    fun onVoiceSelected(voice: AiVoiceOption) {
+        _selectedVoice.value = voice
     }
 
-    fun onMusicLyricsChanged(value: String) {
-        _musicLyrics.value = value
+    fun runVisionAnalysis() {
+        val sourceUri = _visionSourceUri.value
+        val prompt = _visionPrompt.value.trim()
+        if (prompt.isEmpty() && sourceUri == null) {
+            _visionTaskState.value = AiTaskState.Error("Enter a question or select a photo to analyze.")
+            return
+        }
+
+        viewModelScope.launch {
+            _visionTaskState.value = AiTaskState.Loading(
+                "Connecting to Firebase AI (${AiMediaRepository.MODEL_GEMINI_FLASH})...",
+            )
+            val accumulated = StringBuilder()
+            try {
+                aiRepository.streamVisionAnalysis(
+                    prompt = prompt,
+                    sourceImageUri = sourceUri,
+                ).collect { chunk ->
+                    accumulated.append(chunk)
+                    _visionTaskState.value = AiTaskState.Streaming(accumulated.toString())
+                }
+                val finalText = accumulated.toString().trim()
+                if (finalText.isNotEmpty()) {
+                    _visionTaskState.value = AiTaskState.Success(
+                        GeneratedVisionResult(
+                            text = finalText,
+                            prompt = prompt,
+                            modelId = AiMediaRepository.MODEL_GEMINI_FLASH,
+                            hasSourcePhoto = sourceUri != null,
+                        ),
+                    )
+                } else {
+                    _visionTaskState.value = AiTaskState.Error("Gemini returned an empty response.")
+                }
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Vision stream timed out", e)
+                _visionTaskState.value = AiTaskState.Error("Vision request timed out after 60 seconds.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Vision generation failed", e)
+                _visionTaskState.value = AiTaskState.Error(aiRepository.formatFirebaseError(e))
+            }
+        }
     }
 
-    fun onMusicVariantChanged(variant: AiMusicVariant) {
-        _musicVariant.value = variant
+    fun enhanceImagePrompt() {
+        val current = _imagePrompt.value.trim()
+        if (current.isEmpty()) {
+            viewModelScope.launch { _events.emit("Enter a short idea first to enhance it with Gemini.") }
+            return
+        }
+        viewModelScope.launch {
+            _isEnhancingPrompt.value = true
+            try {
+                val enhanced = aiRepository.enhancePromptWithGemini(
+                    rawIdea = current,
+                    targetTask = "image generation/editing",
+                )
+                _imagePrompt.value = enhanced
+            } catch (e: TimeoutCancellationException) {
+                _events.emit("Prompt enhancement timed out.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Prompt enhance failed", e)
+                _events.emit(aiRepository.formatFirebaseError(e))
+            } finally {
+                _isEnhancingPrompt.value = false
+            }
+        }
     }
 
     fun generateOrEditImage() {
@@ -164,9 +259,9 @@ class AiStudioViewModel(
         viewModelScope.launch {
             _imageTaskState.value = AiTaskState.Loading(
                 if (sourceUri != null) {
-                    "Editing image with ${AiMediaRepository.MODEL_IMAGE_NANO_BANANA}..."
+                    "Editing photo via Firebase AI (${AiMediaRepository.MODEL_IMAGE_NANO_BANANA})..."
                 } else {
-                    "Generating image with ${AiMediaRepository.MODEL_IMAGE_NANO_BANANA}..."
+                    "Generating image via Firebase AI (${AiMediaRepository.MODEL_IMAGE_NANO_BANANA})..."
                 },
             )
             try {
@@ -178,15 +273,11 @@ class AiStudioViewModel(
                 _imageTaskState.value = AiTaskState.Success(result)
             } catch (e: TimeoutCancellationException) {
                 _imageTaskState.value = AiTaskState.Error("Image generation timed out after 60 seconds.")
-            } catch (e: QuotaExceededException) {
-                _imageTaskState.value = AiTaskState.Error("Quota or rate limit exceeded. Please try again shortly.")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Image generation failed", e)
-                _imageTaskState.value = AiTaskState.Error(
-                    e.localizedMessage ?: "Image generation failed.",
-                )
+                _imageTaskState.value = AiTaskState.Error(aiRepository.formatFirebaseError(e))
             }
         }
     }
@@ -203,10 +294,10 @@ class AiStudioViewModel(
 
         viewModelScope.launch {
             _videoTaskState.value = AiTaskState.Loading(
-                "Animating photo (${ratio.shortLabel}) via ${AiMediaRepository.MODEL_VIDEO_OMNI}...",
+                "Directing motion plan via Firebase AI (${AiMediaRepository.MODEL_GEMINI_FLASH})...",
             )
             try {
-                val result = aiRepository.generateVideoViaInteractions(
+                val result = aiRepository.animatePhotoWithAiDirector(
                     prompt = prompt,
                     sourceImageUri = sourceUri,
                     aspectRatio = ratio,
@@ -215,85 +306,67 @@ class AiStudioViewModel(
                 )
                 _videoTaskState.value = AiTaskState.Success(result)
             } catch (e: TimeoutCancellationException) {
-                _videoTaskState.value = AiTaskState.Error("Video animation timed out after 3 minutes.")
+                _videoTaskState.value = AiTaskState.Error("Photo animation timed out.")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Photo animation failed", e)
-                _videoTaskState.value = AiTaskState.Error(
-                    e.localizedMessage ?: "Could not animate photo.",
-                )
+                _videoTaskState.value = AiTaskState.Error(aiRepository.formatFirebaseError(e))
             }
         }
     }
 
-    fun generateTextToVideo() {
-        val prompt = _videoPrompt.value.trim()
-        if (prompt.isEmpty()) {
-            _videoTaskState.value = AiTaskState.Error("Enter a scene description to generate a video.")
+    fun draftVoiceScriptWithGemini() {
+        val topic = _audioScript.value.trim().ifEmpty {
+            "A cinematic welcome narration for AkiTech Gallery memories"
+        }
+        viewModelScope.launch {
+            _isDraftingScript.value = true
+            try {
+                val drafted = aiRepository.enhancePromptWithGemini(
+                    rawIdea = topic,
+                    targetTask = "expressive 2-sentence voiceover narration script",
+                )
+                _audioScript.value = drafted
+            } catch (e: TimeoutCancellationException) {
+                _events.emit("Script drafting timed out.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Script drafting failed", e)
+                _events.emit(aiRepository.formatFirebaseError(e))
+            } finally {
+                _isDraftingScript.value = false
+            }
+        }
+    }
+
+    fun generateVoiceAudio() {
+        val script = _audioScript.value.trim()
+        if (script.isEmpty()) {
+            _audioTaskState.value = AiTaskState.Error("Enter narration or voice text to synthesize.")
             return
         }
-        val ratio = _videoAspectRatio.value
-        val duration = _videoDurationSeconds.value
+        val voice = _selectedVoice.value
 
         viewModelScope.launch {
-            _videoTaskState.value = AiTaskState.Loading(
-                "Generating ${ratio.shortLabel} video via ${AiMediaRepository.MODEL_VIDEO_OMNI}...",
+            _audioTaskState.value = AiTaskState.Loading(
+                "Synthesizing ${voice.label} via Firebase AI (${AiMediaRepository.MODEL_AUDIO_TTS})...",
             )
             try {
-                val result = aiRepository.generateVideoViaInteractions(
-                    prompt = prompt,
-                    sourceImageUri = null,
-                    aspectRatio = ratio,
-                    durationSeconds = duration,
-                    onProgress = { msg -> _videoTaskState.value = AiTaskState.Loading(msg) },
+                val result = aiRepository.generateVoiceAudio(
+                    scriptText = script,
+                    voice = voice,
+                    onProgress = { msg -> _audioTaskState.value = AiTaskState.Loading(msg) },
                 )
-                _videoTaskState.value = AiTaskState.Success(result)
+                _audioTaskState.value = AiTaskState.Success(result)
             } catch (e: TimeoutCancellationException) {
-                _videoTaskState.value = AiTaskState.Error("Video generation timed out after 3 minutes.")
+                _audioTaskState.value = AiTaskState.Error("Audio synthesis timed out after 60 seconds.")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Text-to-video failed", e)
-                _videoTaskState.value = AiTaskState.Error(
-                    e.localizedMessage ?: "Could not generate video.",
-                )
-            }
-        }
-    }
-
-    fun generateMusic() {
-        val prompt = _musicPrompt.value.trim()
-        if (prompt.isEmpty()) {
-            _musicTaskState.value = AiTaskState.Error("Describe the track, instruments, or vibe to generate music.")
-            return
-        }
-        val mood = _musicMood.value
-        val lyrics = _musicLyrics.value
-        val variant = _musicVariant.value
-
-        viewModelScope.launch {
-            _musicTaskState.value = AiTaskState.Loading("Generating track with ${variant.modelId}...")
-            try {
-                val result = aiRepository.generateMusic(
-                    prompt = prompt,
-                    genreOrMood = mood,
-                    lyrics = lyrics,
-                    variant = variant,
-                    onProgress = { msg -> _musicTaskState.value = AiTaskState.Loading(msg) },
-                )
-                _musicTaskState.value = AiTaskState.Success(result)
-            } catch (e: TimeoutCancellationException) {
-                _musicTaskState.value = AiTaskState.Error("Music generation timed out after 2 minutes.")
-            } catch (e: QuotaExceededException) {
-                _musicTaskState.value = AiTaskState.Error("Quota or rate limit exceeded. Please try again shortly.")
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Music generation failed", e)
-                _musicTaskState.value = AiTaskState.Error(
-                    e.localizedMessage ?: "Music generation failed.",
-                )
+                Log.e(TAG, "Audio synthesis failed", e)
+                _audioTaskState.value = AiTaskState.Error(aiRepository.formatFirebaseError(e))
             }
         }
     }
@@ -315,8 +388,7 @@ class AiStudioViewModel(
 
     fun saveGeneratedVideoToGallery(result: GeneratedVideoResult) {
         viewModelScope.launch {
-            val prefix = if (result.isImageAnimation) "AkiTech_Animate" else "AkiTech_AI_Video"
-            val fileName = "${prefix}_${System.currentTimeMillis()}.mp4"
+            val fileName = "AkiTech_Motion_${System.currentTimeMillis()}.mp4"
             val uri = galleryRepository.saveEditedVideo(result.videoFile, fileName)
             _events.emit(
                 if (uri != null) {
@@ -330,14 +402,14 @@ class AiStudioViewModel(
 
     fun saveGeneratedAudioToLibrary(result: GeneratedAudioResult) {
         viewModelScope.launch {
-            val ext = result.audioFile.extension.ifBlank { "mp3" }
-            val fileName = "AkiTech_Music_${System.currentTimeMillis()}.$ext"
+            val ext = result.audioFile.extension.ifBlank { "wav" }
+            val fileName = "AkiTech_Voice_${result.voice.voiceId}_${System.currentTimeMillis()}.$ext"
             val uri = galleryRepository.saveGeneratedAudio(result.audioFile, fileName, result.mimeType)
             _events.emit(
                 if (uri != null) {
                     app.getString(R.string.ai_saved_audio)
                 } else {
-                    "Could not save track to Music library"
+                    "Could not save audio to Music library"
                 },
             )
         }

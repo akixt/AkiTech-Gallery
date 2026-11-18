@@ -21,10 +21,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MovieCreation
-import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
@@ -52,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -68,13 +70,92 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.akitech.gallery.R
+import com.akitech.gallery.ai.AiMediaRepository
 import com.akitech.gallery.domain.model.AiTaskState
 import com.akitech.gallery.domain.model.AiVideoAspectRatio
 import com.akitech.gallery.domain.model.GeneratedAudioResult
 import com.akitech.gallery.domain.model.GeneratedImageResult
 import com.akitech.gallery.domain.model.GeneratedVideoResult
+import com.akitech.gallery.domain.model.GeneratedVisionResult
 import com.akitech.gallery.ui.util.Formatters
 import kotlinx.coroutines.delay
+
+@Composable
+fun AiVisionResultCard(
+    state: AiTaskState<GeneratedVisionResult>,
+    onCopyText: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AiResultContainer(
+        title = "Firebase AI Insights",
+        subtitle = AiMediaRepository.MODEL_GEMINI_FLASH,
+        modifier = modifier,
+    ) {
+        when (state) {
+            is AiTaskState.Idle -> AiPlaceholderBody(
+                icon = Icons.Rounded.AutoAwesome,
+                text = "Select any photo or ask a creative question to stream real-time insights from Firebase AI.",
+            )
+            is AiTaskState.Loading -> AiLoadingBody(status = state.statusMessage)
+            is AiTaskState.Error -> AiErrorBody(message = state.message)
+            is AiTaskState.Streaming -> {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = state.partialText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .padding(14.dp)
+                            .testTag("ai_vision_streaming_text"),
+                    )
+                }
+            }
+            is AiTaskState.Success -> {
+                val result = state.data
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = result.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier
+                                .padding(14.dp)
+                                .testTag("ai_vision_result_text"),
+                        )
+                    }
+                    FilledTonalButton(
+                        onClick = { onCopyText(result.text) },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("ai_copy_vision_button"),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCopy,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Copy Insights")
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun AiImageResultCard(
@@ -85,7 +166,7 @@ fun AiImageResultCard(
 ) {
     AiResultContainer(
         title = "Image Preview",
-        subtitle = "gemini-nano-banana-2.1",
+        subtitle = AiMediaRepository.MODEL_IMAGE_NANO_BANANA,
         modifier = modifier,
     ) {
         when (state) {
@@ -94,6 +175,7 @@ fun AiImageResultCard(
                 text = "Enter a prompt (and optionally attach a photo) to create or edit an image.",
             )
             is AiTaskState.Loading -> AiLoadingBody(status = state.statusMessage)
+            is AiTaskState.Streaming -> AiLoadingBody(status = "Rendering image...")
             is AiTaskState.Error -> AiErrorBody(message = state.message)
             is AiTaskState.Success -> {
                 val result = state.data
@@ -163,16 +245,17 @@ fun AiVideoResultCard(
     modifier: Modifier = Modifier,
 ) {
     AiResultContainer(
-        title = "Video Output",
-        subtitle = "gemini-omni-1.2-flash • Interactions API",
+        title = "Motion Reel Output",
+        subtitle = "${AiMediaRepository.MODEL_GEMINI_FLASH} • MP4",
         modifier = modifier,
     ) {
         when (state) {
             is AiTaskState.Idle -> AiPlaceholderBody(
                 icon = Icons.Rounded.MovieCreation,
-                text = "Choose 16:9 Landscape or 9:16 Portrait and generate a cinematic video.",
+                text = "Pick a photo and let Firebase AI direct a cinematic 16:9 or 9:16 MP4 motion reel.",
             )
             is AiTaskState.Loading -> AiLoadingBody(status = state.statusMessage)
+            is AiTaskState.Streaming -> AiLoadingBody(status = "Encoding video...")
             is AiTaskState.Error -> AiErrorBody(message = state.message)
             is AiTaskState.Success -> {
                 val result = state.data
@@ -260,6 +343,21 @@ fun AiVideoResultCard(
                         }
                     }
 
+                    if (!result.directorNote.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = "AI Director (${result.motionStyle ?: "motion"}): ${result.directorNote}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
+                    }
+
                     Button(
                         onClick = { onSaveToGallery(result) },
                         shape = RoundedCornerShape(14.dp),
@@ -274,7 +372,7 @@ fun AiVideoResultCard(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save Video to Gallery (${result.aspectRatio.shortLabel})")
+                        Text("Save Motion Video (${result.aspectRatio.shortLabel})")
                     }
                 }
             }
@@ -289,16 +387,17 @@ fun AiAudioResultCard(
     modifier: Modifier = Modifier,
 ) {
     AiResultContainer(
-        title = "Music Track",
-        subtitle = "Lyria 3 Audio Engine",
+        title = "Studio Voice Audio",
+        subtitle = AiMediaRepository.MODEL_AUDIO_TTS,
         modifier = modifier,
     ) {
         when (state) {
             is AiTaskState.Idle -> AiPlaceholderBody(
-                icon = Icons.Rounded.MusicNote,
-                text = "Pick Clip (≤30s) or Full Track (Pro) and describe your song.",
+                icon = Icons.Rounded.GraphicEq,
+                text = "Pick a studio voice and enter a script (or tap AI Write Script) to synthesize speech.",
             )
             is AiTaskState.Loading -> AiLoadingBody(status = state.statusMessage)
+            is AiTaskState.Streaming -> AiLoadingBody(status = "Synthesizing audio...")
             is AiTaskState.Error -> AiErrorBody(message = state.message)
             is AiTaskState.Success -> {
                 val result = state.data
@@ -383,19 +482,19 @@ fun AiAudioResultCard(
                                     ) {
                                         Icon(
                                             imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                            contentDescription = if (isPlaying) "Pause track" else "Play track",
+                                            contentDescription = if (isPlaying) "Pause audio" else "Play audio",
                                             tint = MaterialTheme.colorScheme.onPrimary,
                                         )
                                     }
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = result.variant.label,
+                                        text = "${result.voice.label} • ${result.voice.styleHint}",
                                         style = MaterialTheme.typography.titleSmall,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
                                     Text(
-                                        text = result.variant.modelId,
+                                        text = result.modelId,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -441,21 +540,6 @@ fun AiAudioResultCard(
                         }
                     }
 
-                    if (!result.notesOrLyrics.isNullOrBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                text = result.notesOrLyrics,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(12.dp),
-                            )
-                        }
-                    }
-
                     Button(
                         onClick = { onSaveToLibrary(result) },
                         shape = RoundedCornerShape(14.dp),
@@ -470,7 +554,7 @@ fun AiAudioResultCard(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save Track to Music Library")
+                        Text("Save Audio to Music Library")
                     }
                 }
             }
@@ -529,7 +613,7 @@ private fun AiResultContainer(
 
 @Composable
 private fun AiPlaceholderBody(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     text: String,
 ) {
     Column(
@@ -581,7 +665,9 @@ private fun AiErrorBody(message: String) {
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ai_error_banner"),
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
