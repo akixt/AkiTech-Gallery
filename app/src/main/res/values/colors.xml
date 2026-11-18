@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand_amber">#FFFF8C00</color>
+    <color name="brand_background">#FF090A0E</color>
+    <color name="launcher_bg">#FF000000</color>
+</resources>

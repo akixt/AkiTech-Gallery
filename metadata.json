@@ -1,0 +1,8 @@
+{
+  "name": "AkiTech Gallery",
+  "description": "Offline-first Android photo gallery built with Jetpack Compose, Material 3, MediaStore, Coil, and Room.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
