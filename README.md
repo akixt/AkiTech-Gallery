@@ -1,6 +1,6 @@
 # AkiTech Gallery
 
-**AkiTech Gallery** is a fast, modern Android photo & video gallery, offline studio editor, and **Firebase AI Studio** built with **Kotlin**, **Jetpack Compose**, **Material Design 3**, **MediaStore**, **Jetpack Media3 (ExoPlayer & Transformer)**, **Firebase AI Logic**, **Coil**, and **Room**.
+**AkiTech Gallery** is a fast, modern Android photo & video gallery, offline studio editor, and **Firebase AI Studio** built with **Kotlin**, **Jetpack Compose**, **Material Design 3**, **MediaStore**, **Jetpack Media3 (ExoPlayer & Transformer)**, **Firebase AI Logic**, **Coil**, and **SQLite**.
 
 ## Features
 
@@ -23,11 +23,11 @@
   - Trim start/end range slider with live looped preview
   - Rotate (`0°`, `90°`, `180°`, `270°`), Remove Audio toggle, and GPU filter effects (`Original`, `B&W Noir`, `Vivid`, `Cyan Cool`, `Warm Glow`)
   - Hardware-accelerated offline export via **Media3 Transformer** to `Movies/AkiTech Gallery`
-- **Albums & Favorites**: Folder grouping (`BUCKET_DISPLAY_NAME`) with adaptive two-pane tablet view, local **Favorites** backed by **Room**, and instant **All / Photos / Videos / Favorites** filter chips + search.
+- **Albums & Favorites**: Folder grouping (`BUCKET_DISPLAY_NAME`) with adaptive two-pane tablet view, local **Favorites** backed by **SQLite**, and instant **All / Photos / Videos / Favorites** filter chips + search.
 - **Settings & Developer Info**:
   - Obsidian dark default (`#090A0E`) with Solar Amber-Orange accent (`#FF8C00`) harmonized with the AkiTech Gallery logo, plus System and Light theme switcher
   - Photo Grid Columns (`2`, `3`, `4`, `5`), Compact/Detailed Grid View Mode, default sort order, media badge toggles, video auto-play & loop defaults, and thumbnail disk cache cleaner
-  - Integrated Developer & Studio info card (**Aklilu Asebot** — **AkiTech Studio**)
+  - Integrated Developer & Studio info card (**Aklilu Tibebu / Aki Tech** — BSc Information Systems, Madda Walabu University, Ethiopia)
 - **Permissions UX**: Runtime permission handling for `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_VISUAL_USER_SELECTED` (Android 14+), and `READ_EXTERNAL_STORAGE` (Android 8–12).
 
 ---
@@ -37,20 +37,20 @@
 ```text
 app/src/main/java/com/akitech/gallery/
 ├── AkiTechGalleryApp.kt         # Application class, AppContainer, Coil ImageLoader (Video + GIF)
-├── MainActivity.kt              # Single-activity host with App Check init, SplashScreen & edge-to-edge
+├── MainActivity.kt              # Single-activity host + MediaStoreLazyGrid & MediaStoreCoilThumbnail
 ├── ai/
 │   ├── AppCheckInit.kt          # Firebase App Check (Debug / Play ReCAPTCHA Enterprise)
 │   └── AiMediaRepository.kt     # Nano Banana 2.1 images, Omni 1.2 Flash Interactions video, Lyria 3 music
 ├── data/
-│   ├── local/                   # Room FavoriteEntity, FavoriteDao, GalleryDatabase
+│   ├── local/                   # SQLiteOpenHelper FavoriteEntity, FavoriteDao, GalleryDatabase
 │   ├── mediastore/              # MediaStoreDataSource (photo/video/audio queries, save, delete)
-│   └── repository/              # GalleryRepository (MediaStore + Room + AppSettings prefs)
+│   └── repository/              # GalleryRepository (MediaStore + SQLite + AppSettings prefs)
 ├── di/
 │   └── AppContainer.kt          # Manual constructor dependency injection
 ├── domain/
 │   └── model/                   # Photo, Album, UiState, AppSettings, AiStudioModels
 └── ui/
-    ├── components/              # GalleryTopBar, PhotoGridItem, AiStudioPreviewCards, StateViews
+    ├── components/              # GalleryTopBar, PhotoGridItem, DeveloperInfoCard, AiStudioPreviewCards, StateViews
     ├── navigation/              # GalleryAppRoot (NavHost, FloatingGalleryNavBar, NavigationRail)
     ├── screens/                 # PhotosScreen, AlbumsScreen, AiStudioScreen, FavoritesScreen,
     │                            # SettingsScreen, PhotoViewerScreen, PhotoEditorScreen, VideoEditorScreen

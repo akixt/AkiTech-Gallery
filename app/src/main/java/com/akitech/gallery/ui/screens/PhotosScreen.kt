@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,10 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,6 +41,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.akitech.gallery.MediaStoreLazyGrid
 import com.akitech.gallery.R
 import com.akitech.gallery.domain.model.GridViewMode
 import com.akitech.gallery.domain.model.Photo
@@ -178,94 +174,48 @@ fun PhotoGridContent(
 
         val heroHeight = if (maxWidth >= 600.dp) 220.dp else 184.dp
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
-            state = gridState,
-            contentPadding = PaddingValues(
-                start = 14.dp,
-                end = 14.dp,
-                top = 6.dp,
-                bottom = bottomContentPadding,
-            ),
-            verticalArrangement = Arrangement.spacedBy(spacing),
-            horizontalArrangement = Arrangement.spacedBy(spacing),
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("photos_grid"),
-        ) {
-            if (headerContent != null) {
-                item(
-                    key = "custom_header",
-                    span = { GridItemSpan(maxLineSpan) },
-                    contentType = "header",
-                ) {
-                    headerContent()
-                }
-            }
-
-            if (showHeroSpotlight && photos.isNotEmpty()) {
-                val heroPhoto = photos.first()
-                item(
-                    key = "hero_spotlight_${heroPhoto.id}",
-                    span = { GridItemSpan(maxLineSpan) },
-                    contentType = "hero_spotlight",
-                ) {
+        MediaStoreLazyGrid(
+            photos = photos,
+            columns = columns,
+            spacing = spacing,
+            bottomContentPadding = bottomContentPadding,
+            gridState = gridState,
+            sections = if (showDateSections) sections else emptyList(),
+            headerContent = headerContent,
+            spotlightContent = if (showHeroSpotlight) {
+                { heroPhoto ->
                     LatestCaptureSpotlightCard(
                         photo = heroPhoto,
                         height = heroHeight,
                         onClick = { onPhotoClick(heroPhoto) },
                     )
                 }
-            }
-
-            if (showDateSections && sections.isNotEmpty()) {
-                sections.forEach { section ->
-                    item(
-                        key = "section_${section.title}",
-                        span = { GridItemSpan(maxLineSpan) },
-                        contentType = "section_header",
-                    ) {
-                        SectionHeader(
-                            title = section.title,
-                            count = section.photos.size,
-                        )
-                    }
-                    items(
-                        items = section.photos,
-                        key = { it.id },
-                        contentType = { "photo_grid_item" },
-                    ) { photo ->
-                        PhotoGridItem(
-                            photo = photo,
-                            isSelectionMode = isSelectionMode,
-                            isSelected = photo.id in selectedIds,
-                            showBadges = showMediaBadges,
-                            isDetailedView = isDetailedView,
-                            cornerRadius = cornerRadius,
-                            onClick = { onPhotoClick(photo) },
-                            onLongClick = { onPhotoLongClick(photo) },
-                        )
-                    }
-                }
             } else {
-                items(
-                    items = photos,
-                    key = { it.id },
-                    contentType = { "photo_grid_item" },
-                ) { photo ->
-                    PhotoGridItem(
-                        photo = photo,
-                        isSelectionMode = isSelectionMode,
-                        isSelected = photo.id in selectedIds,
-                        showBadges = showMediaBadges,
-                        isDetailedView = isDetailedView,
-                        cornerRadius = cornerRadius,
-                        onClick = { onPhotoClick(photo) },
-                        onLongClick = { onPhotoLongClick(photo) },
+                null
+            },
+            sectionHeaderContent = if (showDateSections) {
+                { section ->
+                    SectionHeader(
+                        title = section.title,
+                        count = section.photos.size,
                     )
                 }
-            }
-        }
+            } else {
+                null
+            },
+            itemContent = { photo ->
+                PhotoGridItem(
+                    photo = photo,
+                    isSelectionMode = isSelectionMode,
+                    isSelected = photo.id in selectedIds,
+                    showBadges = showMediaBadges,
+                    isDetailedView = isDetailedView,
+                    cornerRadius = cornerRadius,
+                    onClick = { onPhotoClick(photo) },
+                    onLongClick = { onPhotoLongClick(photo) },
+                )
+            },
+        )
     }
 }
 

@@ -52,9 +52,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import coil.request.videoFrameMillis
+import com.akitech.gallery.MediaStoreCoilThumbnail
 import com.akitech.gallery.domain.model.Photo
 import com.akitech.gallery.ui.util.Formatters
 
@@ -71,7 +69,6 @@ fun PhotoGridItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
     val shape = RoundedCornerShape(cornerRadius)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -130,19 +127,9 @@ fun PhotoGridItem(
                 .aspectRatio(1f)
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(photo.contentUri)
-                    .apply {
-                        if (photo.isVideo) {
-                            videoFrameMillis(500L)
-                        }
-                    }
-                    .size(400)
-                    .crossfade(true)
-                    .build(),
+            MediaStoreCoilThumbnail(
+                photo = photo,
                 contentDescription = "${if (photo.isVideo) "Video" else "Photo"} ${photo.displayName} in ${photo.bucketDisplayName}",
-                contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
 

@@ -63,7 +63,14 @@
     <string name="ai_saved_image">AI image saved to AkiTech Gallery</string>
     <string name="ai_saved_video">AI video saved to AkiTech Gallery</string>
     <string name="ai_saved_audio">AI music track saved to Music/AkiTech Gallery</string>
-    <string name="developer_name">Aklilu Asebot</string>
-    <string name="developer_studio">AkiTech Studio</string>
+    <string name="developer_name">Aklilu Tibebu</string>
+    <string name="developer_studio">Aki Tech</string>
+    <string name="developer_profession">BSc Information Systems Student &amp; Software Developer</string>
+    <string name="developer_university">Madda Walabu University</string>
+    <string name="developer_department">Information Systems</string>
+    <string name="developer_academic_level">4th Year</string>
+    <string name="developer_location">Ethiopia</string>
+    <string name="developer_specialization">Information Systems &amp; Software Development</string>
+    <string name="developer_portfolio">Aklilu Tibebu / Aki Tech</string>
     <string name="developer_email">akliluasebot@gmail.com</string>
 </resources>

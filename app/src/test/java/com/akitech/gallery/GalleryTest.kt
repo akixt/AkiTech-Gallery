@@ -16,7 +16,12 @@ import com.akitech.gallery.domain.model.MediaType
 import com.akitech.gallery.domain.model.SortOrder
 import com.akitech.gallery.domain.model.ThemeMode
 import com.akitech.gallery.ui.util.Formatters
+import com.akitech.gallery.data.local.FavoriteEntity
+import com.akitech.gallery.data.local.GalleryDatabase
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,8 +36,13 @@ class GalleryTest {
     fun `app_name and developer strings match AkiTech Gallery`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertEquals("AkiTech Gallery", context.getString(R.string.app_name))
-        assertEquals("Aklilu Asebot", context.getString(R.string.developer_name))
-        assertEquals("AkiTech Studio", context.getString(R.string.developer_studio))
+        assertEquals("Aklilu Tibebu", context.getString(R.string.developer_name))
+        assertEquals("Aki Tech", context.getString(R.string.developer_studio))
+        assertEquals("Madda Walabu University", context.getString(R.string.developer_university))
+        assertEquals("Information Systems", context.getString(R.string.developer_department))
+        assertEquals("4th Year", context.getString(R.string.developer_academic_level))
+        assertEquals("Ethiopia", context.getString(R.string.developer_location))
+        assertEquals("Aklilu Tibebu / Aki Tech", context.getString(R.string.developer_portfolio))
         assertEquals("akliluasebot@gmail.com", context.getString(R.string.developer_email))
         assertEquals("AI Studio", context.getString(R.string.tab_ai_studio))
     }
@@ -98,5 +108,24 @@ class GalleryTest {
         assertEquals("gemini-omni-1.2-flash", AiMediaRepository.MODEL_VIDEO_OMNI)
         assertEquals("lyria-3-clip-preview", AiMusicVariant.CLIP.modelId)
         assertEquals("lyria-3-pro-preview", AiMusicVariant.PRO.modelId)
+    }
+
+    @Test
+    fun `gallery database inserts observes and deletes favorites`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dao = GalleryDatabase.getInstance(context).favoriteDao()
+        val sample = FavoriteEntity(
+            photoId = 42L,
+            contentUri = "content://media/external/images/media/42",
+            displayName = "sunset.jpg",
+            addedAtMillis = 1_700_000_000_000L,
+        )
+        dao.insertFavorite(sample)
+        assertTrue(dao.isFavorite(42L))
+        assertTrue(dao.observeFavoriteIds().first().contains(42L))
+
+        dao.deleteFavoriteById(42L)
+        assertFalse(dao.isFavorite(42L))
+        assertFalse(dao.observeFavoriteIds().first().contains(42L))
     }
 }
