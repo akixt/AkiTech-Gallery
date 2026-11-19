@@ -1,0 +1,148 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated Google user profile and cloud-synced gallery preferences.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID matching the document ID."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name from Google Account."
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional user email from Google Account."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Optional profile avatar URL from Google Account."
+        },
+        "preferredTheme": {
+          "type": "string",
+          "enum": ["DARK", "SYSTEM", "LIGHT"],
+          "description": "Synced app theme preference."
+        },
+        "gridColumns": {
+          "type": "integer",
+          "description": "Preferred photo grid columns between 2 and 5."
+        },
+        "gridViewMode": {
+          "type": "string",
+          "enum": ["COMPACT", "DETAILED"],
+          "description": "Preferred photo grid presentation mode."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": ["userId", "displayName", "preferredTheme", "gridColumns", "gridViewMode", "createdAt", "updatedAt"]
+    },
+    "CloudFavorite": {
+      "title": "CloudFavorite",
+      "description": "Cloud-synced favorite media metadata record for an authenticated user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID."
+        },
+        "mediaId": {
+          "type": "integer",
+          "description": "Device MediaStore item ID."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Media file display name."
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": ["IMAGE", "VIDEO"],
+          "description": "Type of media item."
+        },
+        "bucketName": {
+          "type": "string",
+          "description": "Album/folder name containing the media."
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "File size in bytes."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": ["userId", "mediaId", "displayName", "mediaType", "bucketName", "sizeBytes", "createdAt", "updatedAt"]
+    },
+    "AiCreationRecord": {
+      "title": "AiCreationRecord",
+      "description": "Cloud-synced history log of AkiTech AI Studio generations and insights.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["VISION_COACH", "IMAGE_STUDIO", "ANIMATE_PHOTO", "VOICE_AUDIO"],
+          "description": "AI Studio feature mode used."
+        },
+        "modelId": {
+          "type": "string",
+          "description": "Firebase AI Logic model identifier used."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Prompt or script submitted by the user."
+        },
+        "outputSummary": {
+          "type": "string",
+          "description": "Summary or excerpt of generated output."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp (FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": ["userId", "mode", "modelId", "prompt", "outputSummary", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Per-user Google Account profile and synced gallery preferences."
+    },
+    "/users/{userId}/favorites/{favoriteId}": {
+      "schema": { "$ref": "#/entities/CloudFavorite" },
+      "description": "Per-user cloud-synced favorite photo/video metadata records."
+    },
+    "/users/{userId}/aiCreations/{creationId}": {
+      "schema": { "$ref": "#/entities/AiCreationRecord" },
+      "description": "Per-user cloud-synced AI Studio prompt and creation log."
+    }
+  }
+}

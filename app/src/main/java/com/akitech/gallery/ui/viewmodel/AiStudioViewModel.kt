@@ -99,8 +99,18 @@ class AiStudioViewModel(
     private val _audioTaskState = MutableStateFlow<AiTaskState<GeneratedAudioResult>>(AiTaskState.Idle)
     val audioTaskState: StateFlow<AiTaskState<GeneratedAudioResult>> = _audioTaskState.asStateFlow()
 
+    data class CompletedAiCreation(
+        val mode: AiStudioMode,
+        val modelId: String,
+        val prompt: String,
+        val outputSummary: String,
+    )
+
     private val _events = MutableSharedFlow<String>()
     val events: SharedFlow<String> = _events.asSharedFlow()
+
+    private val _completedCreations = MutableSharedFlow<CompletedAiCreation>(extraBufferCapacity = 8)
+    val completedCreations: SharedFlow<CompletedAiCreation> = _completedCreations.asSharedFlow()
 
     fun ensureConnectionChecked() {
         if (_connectionStatus.value is FirebaseConnectionStatus.Unknown) {
@@ -118,6 +128,16 @@ class AiStudioViewModel(
 
     fun setActiveMode(mode: AiStudioMode) {
         _activeMode.value = mode
+    }
+
+    fun loadPromptFromHistory(mode: AiStudioMode, prompt: String) {
+        _activeMode.value = mode
+        when (mode) {
+            AiStudioMode.VISION_COACH -> _visionPrompt.value = prompt
+            AiStudioMode.IMAGE_STUDIO -> _imagePrompt.value = prompt
+            AiStudioMode.ANIMATE_PHOTO -> _animatePrompt.value = prompt
+            AiStudioMode.VOICE_AUDIO -> _audioScript.value = prompt
+        }
     }
 
     fun launchWithPhoto(uri: Uri, targetMode: AiStudioMode) {
@@ -205,6 +225,14 @@ class AiStudioViewModel(
                             hasSourcePhoto = sourceUri != null,
                         ),
                     )
+                    _completedCreations.tryEmit(
+                        CompletedAiCreation(
+                            mode = AiStudioMode.VISION_COACH,
+                            modelId = AiMediaRepository.MODEL_GEMINI_FLASH,
+                            prompt = prompt.ifBlank { "Photo scene & edit analysis" },
+                            outputSummary = finalText.take(600),
+                        ),
+                    )
                 } else {
                     _visionTaskState.value = AiTaskState.Error("Gemini returned an empty response.")
                 }
@@ -271,6 +299,14 @@ class AiStudioViewModel(
                     aspectRatio = aspectRatio,
                 )
                 _imageTaskState.value = AiTaskState.Success(result)
+                _completedCreations.tryEmit(
+                    CompletedAiCreation(
+                        mode = AiStudioMode.IMAGE_STUDIO,
+                        modelId = AiMediaRepository.MODEL_IMAGE_NANO_BANANA,
+                        prompt = prompt,
+                        outputSummary = "${if (result.isEdit) "Edited photo" else "Generated image"} (${aspectRatio.label})",
+                    ),
+                )
             } catch (e: TimeoutCancellationException) {
                 _imageTaskState.value = AiTaskState.Error("Image generation timed out after 60 seconds.")
             } catch (e: CancellationException) {
@@ -305,6 +341,14 @@ class AiStudioViewModel(
                     onProgress = { msg -> _videoTaskState.value = AiTaskState.Loading(msg) },
                 )
                 _videoTaskState.value = AiTaskState.Success(result)
+                _completedCreations.tryEmit(
+                    CompletedAiCreation(
+                        mode = AiStudioMode.ANIMATE_PHOTO,
+                        modelId = AiMediaRepository.MODEL_GEMINI_FLASH,
+                        prompt = result.prompt,
+                        outputSummary = "${ratio.shortLabel} ${duration}s MP4 (${result.motionStyle ?: "ken_burns"})",
+                    ),
+                )
             } catch (e: TimeoutCancellationException) {
                 _videoTaskState.value = AiTaskState.Error("Photo animation timed out.")
             } catch (e: CancellationException) {
@@ -360,6 +404,14 @@ class AiStudioViewModel(
                     onProgress = { msg -> _audioTaskState.value = AiTaskState.Loading(msg) },
                 )
                 _audioTaskState.value = AiTaskState.Success(result)
+                _completedCreations.tryEmit(
+                    CompletedAiCreation(
+                        mode = AiStudioMode.VOICE_AUDIO,
+                        modelId = AiMediaRepository.MODEL_AUDIO_TTS,
+                        prompt = script,
+                        outputSummary = "Voice: ${voice.label} (${result.mimeType})",
+                    ),
+                )
             } catch (e: TimeoutCancellationException) {
                 _audioTaskState.value = AiTaskState.Error("Audio synthesis timed out after 60 seconds.")
             } catch (e: CancellationException) {

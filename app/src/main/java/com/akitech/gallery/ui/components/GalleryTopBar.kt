@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.akitech.gallery.R
 import com.akitech.gallery.domain.model.GridViewMode
 import com.akitech.gallery.domain.model.MediaFilter
@@ -106,6 +107,8 @@ fun GalleryTopBar(
     favoritesOnly: Boolean,
     itemCountText: String?,
     selectedCount: Int,
+    userPhotoUrl: String? = null,
+    userDisplayName: String? = null,
     onBackClick: (() -> Unit)?,
     onOpenSettings: (() -> Unit)?,
     onToggleSearch: () -> Unit,
@@ -455,11 +458,27 @@ fun GalleryTopBar(
                                         .minimumInteractiveComponentSize()
                                         .testTag("settings_button"),
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Settings,
-                                        contentDescription = stringResource(R.string.cd_settings),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                                    if (!userPhotoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = userPhotoUrl,
+                                            contentDescription = userDisplayName ?: stringResource(R.string.cd_settings),
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(CircleShape)
+                                                .border(
+                                                    width = 1.5.dp,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    shape = CircleShape,
+                                                ),
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Settings,
+                                            contentDescription = stringResource(R.string.cd_settings),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }

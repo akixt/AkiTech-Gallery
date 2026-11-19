@@ -91,6 +91,9 @@ class GalleryViewModel(
     private val _deleteEvents = MutableSharedFlow<DeleteEvent>()
     val deleteEvents: SharedFlow<DeleteEvent> = _deleteEvents.asSharedFlow()
 
+    private val _favoriteSyncEvents = MutableSharedFlow<Pair<Photo, Boolean>>(extraBufferCapacity = 32)
+    val favoriteSyncEvents: SharedFlow<Pair<Photo, Boolean>> = _favoriteSyncEvents.asSharedFlow()
+
     private var pendingDeletePhotos: List<Photo> = emptyList()
 
     private val rawPhotosState: StateFlow<UiState<List<Photo>>> = repository.observePhotos()
@@ -199,6 +202,19 @@ class GalleryViewModel(
         started = SharingStarted.WhileSubscribed(5_000L),
         initialValue = UiState.Loading,
     )
+
+    val recentDeviceImages: StateFlow<List<Photo>> = rawPhotosState
+        .map { state ->
+            when (state) {
+                is UiState.Success -> state.data.filter { it.isImage }.take(20)
+                else -> emptyList()
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = emptyList(),
+        )
 
     init {
         refreshCacheSize()
@@ -387,6 +403,7 @@ class GalleryViewModel(
         val shouldFavorite = targets.any { !it.isFavorite }
         viewModelScope.launch {
             repository.setFavoriteForMany(targets, shouldFavorite)
+            targets.forEach { _favoriteSyncEvents.tryEmit(it to shouldFavorite) }
             clearSelection()
         }
     }
@@ -398,8 +415,10 @@ class GalleryViewModel(
     }
 
     fun toggleFavorite(photo: Photo) {
+        val nextFavorite = !photo.isFavorite
         viewModelScope.launch {
             repository.toggleFavorite(photo)
+            _favoriteSyncEvents.tryEmit(photo to nextFavorite)
         }
     }
 

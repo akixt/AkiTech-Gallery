@@ -63,10 +63,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -81,6 +84,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -93,6 +97,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.akitech.gallery.R
+import com.akitech.gallery.data.remote.authStateFlow
+import com.akitech.gallery.data.remote.signOutGoogleAccount
 import com.akitech.gallery.domain.model.AiStudioMode
 import com.akitech.gallery.domain.model.GalleryTab
 import com.akitech.gallery.domain.model.PermissionStatus
@@ -105,6 +111,7 @@ import com.akitech.gallery.ui.components.PermissionExplanationScreen
 import com.akitech.gallery.ui.screens.AiStudioScreen
 import com.akitech.gallery.ui.screens.AlbumDetailScreen
 import com.akitech.gallery.ui.screens.AlbumsScreen
+import com.akitech.gallery.ui.screens.AuthScreen
 import com.akitech.gallery.ui.screens.FavoritesScreen
 import com.akitech.gallery.ui.screens.PhotoEditorScreen
 import com.akitech.gallery.ui.screens.PhotoViewerScreen
@@ -113,9 +120,14 @@ import com.akitech.gallery.ui.screens.SettingsScreen
 import com.akitech.gallery.ui.screens.VideoEditorScreen
 import com.akitech.gallery.ui.theme.AkiTechGalleryTheme
 import com.akitech.gallery.ui.util.PermissionHelper
+import com.akitech.gallery.ui.viewmodel.AccountViewModel
 import com.akitech.gallery.ui.viewmodel.AiStudioViewModel
 import com.akitech.gallery.ui.viewmodel.DeleteEvent
 import com.akitech.gallery.ui.viewmodel.GalleryViewModel
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.auth
 
 object GalleryRoutes {
     const val PHOTOS = "photos"
@@ -198,7 +210,48 @@ fun GalleryAppRoot(
     viewModel: GalleryViewModel,
     aiViewModel: AiStudioViewModel = viewModel(factory = AiStudioViewModel.Factory),
 ) {
+    val auth = remember { Firebase.auth }
+    val currentUser by remember(auth) { auth.authStateFlow() }
+        .collectAsStateWithLifecycle(initialValue = auth.currentUser)
+
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+
+    val user = currentUser
+    if (user == null) {
+        AkiTechGalleryTheme(themeMode = themeMode) {
+            AuthScreen(
+                onAuthSuccess = {
+                    // AuthStateListener updates currentUser reactively
+                },
+            )
+        }
+    } else {
+        val uid = user.uid
+        key(uid) {
+            AuthenticatedGalleryRoot(
+                currentUser = user,
+                currentUserId = uid,
+                viewModel = viewModel,
+                aiViewModel = aiViewModel,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AuthenticatedGalleryRoot(
+    currentUser: FirebaseUser,
+    currentUserId: String,
+    viewModel: GalleryViewModel,
+    aiViewModel: AiStudioViewModel,
+    accountViewModel: AccountViewModel = viewModel(
+        key = currentUserId,
+        factory = AccountViewModel.factory(currentUserId),
+    ),
+) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -219,6 +272,53 @@ fun GalleryAppRoot(
     val photosUiState by viewModel.filteredPhotosState.collectAsStateWithLifecycle()
     val albumsUiState by viewModel.filteredAlbumsState.collectAsStateWithLifecycle()
     val favoritesUiState by viewModel.favoritePhotosState.collectAsStateWithLifecycle()
+    val recentDeviceImages by viewModel.recentDeviceImages.collectAsStateWithLifecycle()
+
+    val userProfileState by accountViewModel.userProfileState.collectAsStateWithLifecycle()
+    val cloudFavoritesState by accountViewModel.cloudFavoritesState.collectAsStateWithLifecycle()
+    val aiCreationsState by accountViewModel.aiCreationsState.collectAsStateWithLifecycle()
+
+    val cloudProfile = (userProfileState as? UiState.Success)?.data
+    val cloudFavorites = (cloudFavoritesState as? UiState.Success)?.data.orEmpty()
+    val cloudCreations = (aiCreationsState as? UiState.Success)?.data.orEmpty()
+
+    LaunchedEffect(currentUserId) {
+        accountViewModel.syncInitialProfile(currentUser, appSettings)
+    }
+
+    LaunchedEffect(
+        cloudProfile != null,
+        appSettings.themeMode,
+        appSettings.gridColumns,
+        appSettings.gridViewMode,
+    ) {
+        if (cloudProfile != null) {
+            accountViewModel.syncPreferences(appSettings)
+        }
+    }
+
+    LaunchedEffect(viewModel, accountViewModel) {
+        viewModel.favoriteSyncEvents.collect { (photo, isFavorite) ->
+            accountViewModel.syncFavorite(photo, isFavorite)
+        }
+    }
+
+    LaunchedEffect(aiViewModel, accountViewModel) {
+        aiViewModel.completedCreations.collect { created ->
+            accountViewModel.logAiCreation(
+                mode = created.mode,
+                modelId = created.modelId,
+                prompt = created.prompt,
+                outputSummary = created.outputSummary,
+            )
+        }
+    }
+
+    LaunchedEffect(accountViewModel) {
+        accountViewModel.events.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
 
     var wasDeniedOnce by rememberSaveable { mutableStateOf(false) }
     var legacyDeleteTargets by remember { mutableStateOf<List<Photo>>(emptyList()) }
@@ -507,6 +607,8 @@ fun GalleryAppRoot(
                                         favoritesOnly = favoritesOnly,
                                         itemCountText = countText,
                                         selectedCount = selectedIds.size,
+                                        userPhotoUrl = cloudProfile?.photoUrl ?: currentUser.photoUrl?.toString(),
+                                        userDisplayName = cloudProfile?.displayName ?: currentUser.displayName,
                                         onBackClick = if (currentRoute.startsWith("album/")) {
                                             {
                                                 viewModel.clearSelection()
@@ -642,11 +744,13 @@ fun GalleryAppRoot(
                                         }
 
                                         composable(GalleryRoutes.AI_STUDIO) {
-                                            val recentPhotos = (photosUiState as? UiState.Success)?.data.orEmpty()
                                             AiStudioScreen(
                                                 aiViewModel = aiViewModel,
-                                                recentPhotos = recentPhotos,
+                                                recentPhotos = recentDeviceImages,
                                                 bottomContentPadding = bottomGridPadding,
+                                                cloudCreations = cloudCreations,
+                                                onDeleteCloudCreation = accountViewModel::deleteAiCreation,
+                                                onShowMessage = viewModel::notifyMessage,
                                             )
                                         }
 
@@ -692,6 +796,20 @@ fun GalleryAppRoot(
                                                 onLoopVideosChange = viewModel::setLoopVideos,
                                                 onShowMediaBadgesChange = viewModel::setShowMediaBadges,
                                                 onClearCache = viewModel::clearThumbnailCache,
+                                                accountName = cloudProfile?.displayName
+                                                    ?: currentUser.displayName
+                                                    ?: "Google Member",
+                                                accountEmail = cloudProfile?.email ?: currentUser.email,
+                                                accountPhotoUrl = cloudProfile?.photoUrl
+                                                    ?: currentUser.photoUrl?.toString(),
+                                                cloudFavoritesCount = cloudFavorites.size,
+                                                cloudAiLogsCount = cloudCreations.size,
+                                                onSignOutClick = {
+                                                    signOutGoogleAccount(
+                                                        credentialManager = credentialManager,
+                                                        scope = scope,
+                                                    )
+                                                },
                                             )
                                         }
 

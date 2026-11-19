@@ -27,7 +27,9 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MovieCreation
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
@@ -35,6 +37,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,6 +58,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.akitech.gallery.domain.model.AiCreationRecord
 import com.akitech.gallery.domain.model.AiStudioMode
 import com.akitech.gallery.domain.model.AiTaskState
 import com.akitech.gallery.domain.model.FirebaseConnectionStatus
@@ -76,6 +80,8 @@ fun AiStudioScreen(
     aiViewModel: AiStudioViewModel,
     recentPhotos: List<Photo>,
     bottomContentPadding: Dp,
+    cloudCreations: List<AiCreationRecord> = emptyList(),
+    onDeleteCloudCreation: (String) -> Unit = {},
     onShowMessage: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -315,8 +321,19 @@ fun AiStudioScreen(
                             .fillMaxHeight()
                             .verticalScroll(rememberScrollState())
                             .padding(bottom = bottomContentPadding),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         previewContent()
+                        if (cloudCreations.isNotEmpty()) {
+                            AiCloudHistoryCard(
+                                records = cloudCreations,
+                                onReusePrompt = { record ->
+                                    aiViewModel.loadPromptFromHistory(record.safeMode(), record.prompt)
+                                    onShowMessage("Loaded prompt into ${record.safeMode().label}")
+                                },
+                                onDeleteRecord = onDeleteCloudCreation,
+                            )
+                        }
                     }
                 }
             } else {
@@ -339,6 +356,16 @@ fun AiStudioScreen(
                     ) {
                         controlsContent()
                         previewContent()
+                        if (cloudCreations.isNotEmpty()) {
+                            AiCloudHistoryCard(
+                                records = cloudCreations,
+                                onReusePrompt = { record ->
+                                    aiViewModel.loadPromptFromHistory(record.safeMode(), record.prompt)
+                                    onShowMessage("Loaded prompt into ${record.safeMode().label}")
+                                },
+                                onDeleteRecord = onDeleteCloudCreation,
+                            )
+                        }
                     }
                 }
             }
@@ -463,6 +490,93 @@ private fun FirebaseConnectionBanner(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Verify")
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiCloudHistoryCard(
+    records: List<AiCreationRecord>,
+    onReusePrompt: (AiCreationRecord) -> Unit,
+    onDeleteRecord: (String) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
+                shape = RoundedCornerShape(20.dp),
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Rounded.History,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Synced AI Studio History (${records.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+
+            records.take(6).forEach { record ->
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    onClick = { onReusePrompt(record) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${record.safeMode().label} • ${record.modelId}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = record.prompt,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = record.outputSummary,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (record.id.isNotBlank()) {
+                            IconButton(onClick = { onDeleteRecord(record.id) }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DeleteOutline,
+                                    contentDescription = "Delete cloud history entry",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

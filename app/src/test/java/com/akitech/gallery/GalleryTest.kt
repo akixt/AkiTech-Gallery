@@ -3,11 +3,16 @@ package com.akitech.gallery
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.akitech.gallery.ai.AiMediaRepository
+import com.akitech.gallery.ai.AudioWavHelper
+import com.akitech.gallery.data.local.FavoriteEntity
+import com.akitech.gallery.data.local.GalleryDatabase
+import com.akitech.gallery.domain.model.AiCreationRecord
 import com.akitech.gallery.domain.model.AiImageAspectRatio
-import com.akitech.gallery.domain.model.AiMusicVariant
 import com.akitech.gallery.domain.model.AiStudioMode
 import com.akitech.gallery.domain.model.AiVideoAspectRatio
+import com.akitech.gallery.domain.model.AiVoiceOption
 import com.akitech.gallery.domain.model.AppSettings
+import com.akitech.gallery.domain.model.CloudFavorite
 import com.akitech.gallery.domain.model.GalleryTab
 import com.akitech.gallery.domain.model.GridDensity
 import com.akitech.gallery.domain.model.GridViewMode
@@ -15,9 +20,8 @@ import com.akitech.gallery.domain.model.MediaFilter
 import com.akitech.gallery.domain.model.MediaType
 import com.akitech.gallery.domain.model.SortOrder
 import com.akitech.gallery.domain.model.ThemeMode
+import com.akitech.gallery.domain.model.UserProfile
 import com.akitech.gallery.ui.util.Formatters
-import com.akitech.gallery.data.local.FavoriteEntity
-import com.akitech.gallery.data.local.GalleryDatabase
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -98,16 +102,69 @@ class GalleryTest {
     }
 
     @Test
-    fun `ai studio models expose required Gemini and Lyria identifiers`() {
+    fun `ai studio models expose supported Firebase AI Logic identifiers and voices`() {
         assertEquals(4, AiStudioMode.entries.size)
         assertEquals(5, AiImageAspectRatio.entries.size)
         assertEquals(2, AiVideoAspectRatio.entries.size)
+        assertEquals(6, AiVoiceOption.entries.size)
         assertEquals("16:9", AiVideoAspectRatio.LANDSCAPE_16_9.apiValue)
         assertEquals("9:16", AiVideoAspectRatio.PORTRAIT_9_16.apiValue)
+        assertEquals("gemini-3.8-flash", AiMediaRepository.MODEL_GEMINI_FLASH)
         assertEquals("gemini-nano-banana-2.1", AiMediaRepository.MODEL_IMAGE_NANO_BANANA)
-        assertEquals("gemini-omni-1.2-flash", AiMediaRepository.MODEL_VIDEO_OMNI)
-        assertEquals("lyria-3-clip-preview", AiMusicVariant.CLIP.modelId)
-        assertEquals("lyria-3-pro-preview", AiMusicVariant.PRO.modelId)
+        assertEquals("gemini-3.1-flash-tts-preview", AiMediaRepository.MODEL_AUDIO_TTS)
+        assertEquals("Charon", AiVoiceOption.CHARON.voiceId)
+        assertEquals("Kore", AiVoiceOption.KORE.voiceId)
+    }
+
+    @Test
+    fun `audio wav helper wraps raw pcm bytes into valid RIFF WAVE header`() {
+        val pcmSample = ByteArray(16) { 1 }
+        val result = AudioWavHelper.preparePlayableAudio(pcmSample, "audio/L16;rate=24000")
+        assertEquals("wav", result.fileExtension)
+        assertEquals("audio/wav", result.mimeType)
+        assertEquals(44 + pcmSample.size, result.bytes.size)
+        assertEquals('R'.code.toByte(), result.bytes[0])
+        assertEquals('I'.code.toByte(), result.bytes[1])
+        assertEquals('F'.code.toByte(), result.bytes[2])
+        assertEquals('F'.code.toByte(), result.bytes[3])
+        assertEquals('W'.code.toByte(), result.bytes[8])
+        assertEquals('A'.code.toByte(), result.bytes[9])
+        assertEquals('V'.code.toByte(), result.bytes[10])
+        assertEquals('E'.code.toByte(), result.bytes[11])
+    }
+
+    @Test
+    fun `cloud models omit id and null optionals and coerce bounds`() {
+        val profileMap = UserProfile(
+            id = "doc_should_omit",
+            userId = "uid_123",
+            displayName = "  Aklilu Tibebu  ",
+            email = null,
+            photoUrl = "   ",
+            preferredTheme = "DARK",
+            gridColumns = 99L,
+            gridViewMode = "DETAILED",
+        ).toCreateMap()
+        assertFalse(profileMap.containsKey("id"))
+        assertFalse(profileMap.containsKey("email"))
+        assertFalse(profileMap.containsKey("photoUrl"))
+        assertEquals(5L, profileMap["gridColumns"])
+        assertEquals("Aklilu Tibebu", profileMap["displayName"])
+
+        val favMap = CloudFavorite(
+            id = "fav_42",
+            userId = "uid_123",
+            mediaId = 42L,
+            displayName = "sunset.jpg",
+            mediaType = "IMAGE",
+            bucketName = "Camera",
+            sizeBytes = 1024L,
+        ).toCreateMap()
+        assertFalse(favMap.containsKey("id"))
+        assertEquals(42L, favMap["mediaId"])
+
+        val creation = AiCreationRecord(mode = "UNKNOWN_MODE")
+        assertEquals(AiStudioMode.VISION_COACH, creation.safeMode())
     }
 
     @Test

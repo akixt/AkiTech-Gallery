@@ -11,11 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.SdStorage
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.VideoFile
@@ -94,7 +94,7 @@ fun PhotoDetailsSheet(
                 value = Formatters.formatResolution(photo.width, photo.height),
             )
             DetailRow(
-                icon = Icons.Rounded.InsertDriveFile,
+                icon = Icons.AutoMirrored.Rounded.InsertDriveFile,
                 label = stringResource(R.string.details_type),
                 value = photo.mimeType,
             )

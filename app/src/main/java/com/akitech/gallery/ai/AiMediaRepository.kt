@@ -25,6 +25,7 @@ import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.ImageConfig
 import com.google.firebase.ai.type.ImagePart
 import com.google.firebase.ai.type.InlineDataPart
+import com.google.firebase.ai.type.PublicPreviewAPI
 import com.google.firebase.ai.type.QuotaExceededException
 import com.google.firebase.ai.type.ResponseModality
 import com.google.firebase.ai.type.Schema
@@ -348,6 +349,7 @@ class AiMediaRepository(
         )
     }
 
+    @OptIn(PublicPreviewAPI::class)
     suspend fun generateVoiceAudio(
         scriptText: String,
         voice: AiVoiceOption,
